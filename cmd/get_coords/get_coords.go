@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -58,7 +59,7 @@ func makeCall(url *string) []hcip2.JSONResult {
 	}
 	if resp.StatusCode != 200 {
 		fmt.Printf("Non-OK response code from Nominatim: %d %s\n", resp.StatusCode, resp.Body)
-		fmt.Printf("Came from URL %s\n", url)
+		fmt.Printf("Came from URL %s\n", *url)
 		os.Exit(1)
 	}
 
@@ -66,8 +67,12 @@ func makeCall(url *string) []hcip2.JSONResult {
 	err = json.NewDecoder(resp.Body).Decode(&v)
 	if err != nil {
 		fmt.Printf("Error decoding JSON: %s\n", err.Error())
+		fmt.Printf("From URL: %s\n", *url)
+		body, _ := ioutil.ReadAll(resp.Body)
+		fmt.Printf("Full response was: %s\n", body)
 		os.Exit(1)
 	}
+	return v
 }
 
 func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.File) {
