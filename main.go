@@ -5,6 +5,31 @@ import (
 	"os"
 )
 
+var Configs map[string]HciConfig = map[string]HciConfig{
+	"NC": NC,
+	"WA": WA,
+}
+
+type HciConfig struct {
+	Road           []int
+	RoadNoUnit     []int
+	MaxLineLength  int
+	CITY           int
+	STATE          int
+	ZIP            int
+	STATE_VOTER_ID int
+	FilterStr      func([]string) bool // returns `true` if we should KEEP the record
+	FilterBytes    func([][]byte) bool // returns `true` if we should KEEP the record
+}
+
+func NopFilterBytes(_ [][]byte) bool {
+	return true
+}
+
+func NopFilterStrings(_ []string) bool {
+	return true
+}
+
 // JSONResult is the jsonv2 type we get from the nominatim API
 type JSONResult struct {
 	PlaceID           int `json:"place_id"`
