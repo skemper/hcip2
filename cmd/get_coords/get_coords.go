@@ -15,7 +15,7 @@ import (
 	"github.com/skemper/hcip2"
 )
 
-const readBatchSize = 10000
+const readBatchSize = 1000
 const maxLineLength = 1000
 
 var newline = []byte{'\n'}
@@ -75,6 +75,15 @@ func makeCall(url *string) []hcip2.JSONResult {
 	return v
 }
 
+type myString struct {
+	Data   [maxLineLength]byte
+	Length int
+}
+
+func (m myString) String() string {
+	return fmt.Sprintf("%s", m.Data)
+}
+
 func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.File) {
 	vrdbFilename := os.Args[2]
 	vrdb, err := os.Open(vrdbFilename)
@@ -91,18 +100,10 @@ func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.
 
 	for !done {
 		start := time.Now()
-		var lines [readBatchSize][maxLineLength]byte
-		var lineLengths [readBatchSize]int
-		var badlines [readBatchSize][maxLineLength]byte
-		var badlineLengths [readBatchSize]int
-		var numBads = 0
-		var multilines [readBatchSize][maxLineLength]byte
-		var multilineLengths [readBatchSize]int
-		var numMultis = 0
-
-		var goodlines [readBatchSize]hcip2.JSONResult
-		var goodlineVoterIDLengths [readBatchSize]int
-		var numGoods = 0
+		var lines chan myString = make(chan myString, readBatchSize)
+		var goodlines chan hcip2.JSONResult = make(chan hcip2.JSONResult, readBatchSize/10)
+		var badlines chan myString = make(chan myString, readBatchSize/10)
+		var multilines chan myString = make(chan myString, readBatchSize/10)
 
 		// we're going to read these in batches
 		for i := 0; i < readBatchSize; i++ {
@@ -111,78 +112,87 @@ func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.
 				break
 			}
 			line := scanner.Bytes()
-			lineLengths[i] = copyByteArray(&lines[i], line)
+			tosend := myString{}
+			tosend.Length = copyByteArray(&tosend.Data, line)
+			lines <- tosend
 		}
+		close(lines)
 
-		for i, line := range lines {
+		for line := range lines {
 			// we're going to cobble their street address together
 			// fmt.Printf("Working on %s\n", line)
-			pieces := bytes.Split(line[:], []byte{'|'})
-			// fmt.Printf("Split to %s\n", pieces)
-			roadBuilder := strings.Builder{}
-			for _, piece := range config.RoadNoUnit {
-				for i := range pieces[piece] {
-					if pieces[piece][i] == ' ' {
-						pieces[piece][i] = '+'
-					}
-				}
-				roadBuilder.Write(pieces[piece])
-				roadBuilder.WriteRune('+')
-			}
-			streetAddr := roadBuilder.String()
-
-			// now we can construct the URL for querying the database
-			urlBuilder := strings.Builder{}
-			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
-			urlBuilder.WriteString(streetAddr)
-			urlBuilder.WriteString("&city=")
-			for i := range pieces[config.CITY] {
-				if pieces[config.CITY][i] == ' ' {
-					pieces[config.CITY][i] = '+'
-				}
-			}
-			urlBuilder.Write(pieces[config.CITY])
-			urlBuilder.WriteString("&state=")
-			urlBuilder.Write(pieces[config.STATE])
-			urlBuilder.WriteString("&postalcode=")
-			urlBuilder.Write(pieces[config.ZIP])
-			url := urlBuilder.String()
-
-			v := makeCall(&url)
-
-			if len(v) == 0 {
-				badlines[numBads] = line
-				badlineLengths[numBads] = lineLengths[i]
-				numBads++
-			} else if len(v) > 1 {
-				multilines[numMultis] = line
-				multilineLengths[numMultis] = lineLengths[i]
-				numMultis++
-			} else {
-				// one record - the good case
-				goodlines[numGoods] = v[0]
-				goodlineVoterIDLengths[numGoods] = copyByteArray2(&goodlines[numGoods].StateVoterIDBytes, pieces[config.STATE_VOTER_ID])
-				numGoods++
-			}
+			go lookupMyStringAddress(line, config, goodlines, badlines, multilines)
 		}
 
-		for i := 0; i < numBads; i++ {
-			bads.Write(badlines[i][:badlineLengths[i]])
-			bads.Write(newline)
-		}
-
-		for i := 0; i < numMultis; i++ {
-			multis.Write(multilines[i][:multilineLengths[i]])
-			multis.Write(newline)
-		}
-
-		for i := 0; i < numGoods; i++ {
-			goods.WriteString(fmt.Sprintf("%s,%s,%s\n", goodlines[i].StateVoterIDBytes[:goodlineVoterIDLengths[i]], goodlines[i].Lat, goodlines[i].Lon))
+		innerdone := false
+		for !innerdone {
+			select {
+			case badline := <-badlines:
+				bads.Write(badline.Data[:badline.Length])
+				bads.Write(newline)
+				break
+			case multiline := <-multilines:
+				multis.Write(multiline.Data[:multiline.Length])
+				multis.Write(newline)
+				break
+			case goodline := <-goodlines:
+				goods.WriteString(fmt.Sprintf("%s,%s,%s\n", goodline.StateVoterIDBytes[:goodline.StateVoterIDLength], goodline.Lat, goodline.Lon))
+				break
+			case <-time.After(30 * time.Second):
+				fmt.Println("timeout 1")
+				innerdone = true
+				break
+			}
 		}
 
 		numCycles++
 		end := time.Now()
 		fmt.Printf("Finished %d records in %s...\n", numCycles*readBatchSize, end.Sub(start))
+	}
+}
+
+func lookupMyStringAddress(line myString, config *hcip2.HciConfig, goodlines chan hcip2.JSONResult, badlines chan myString, multilines chan myString) {
+	pieces := bytes.Split(line.Data[:], []byte{'|'})
+	// fmt.Printf("Split to %s\n", pieces)
+	roadBuilder := strings.Builder{}
+	for _, piece := range config.RoadNoUnit {
+		for i := range pieces[piece] {
+			if pieces[piece][i] == ' ' {
+				pieces[piece][i] = '+'
+			}
+		}
+		roadBuilder.Write(pieces[piece])
+		roadBuilder.WriteRune('+')
+	}
+	streetAddr := roadBuilder.String()
+
+	// now we can construct the URL for querying the database
+	urlBuilder := strings.Builder{}
+	urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
+	urlBuilder.WriteString(streetAddr)
+	urlBuilder.WriteString("&city=")
+	for i := range pieces[config.CITY] {
+		if pieces[config.CITY][i] == ' ' {
+			pieces[config.CITY][i] = '+'
+		}
+	}
+	urlBuilder.Write(pieces[config.CITY])
+	urlBuilder.WriteString("&state=")
+	urlBuilder.Write(pieces[config.STATE])
+	urlBuilder.WriteString("&postalcode=")
+	urlBuilder.Write(pieces[config.ZIP])
+	url := urlBuilder.String()
+
+	v := makeCall(&url)
+
+	if len(v) == 0 {
+		badlines <- line
+	} else if len(v) > 1 {
+		multilines <- line
+	} else {
+		// one record - the good case
+		v[0].StateVoterIDLength = copyByteArray2(&v[0].StateVoterIDBytes, pieces[config.STATE_VOTER_ID])
+		goodlines <- v[0]
 	}
 }
 
@@ -222,49 +232,51 @@ func doStrings(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *o
 		}
 
 		for _, line := range lines {
-			// we're going to cobble their street address together
-			// fmt.Printf("Working on %s\n", line)
-			pieces := strings.Split(line[:], splitchar)
+			go func(line string) {
+				// we're going to cobble their street address together
+				// fmt.Printf("Working on %s\n", line)
+				pieces := strings.Split(line[:], splitchar)
 
-			if !config.FilterStr(pieces) {
-				continue
-			}
+				if !config.FilterStr(pieces) {
+					return
+				}
 
-			// fmt.Printf("Split to %s\n", pieces)
-			roadBuilder := strings.Builder{}
-			for _, piece := range config.RoadNoUnit {
-				val := strings.ReplaceAll(pieces[piece], " ", "+")
-				roadBuilder.WriteString(val)
-				roadBuilder.WriteRune('+')
-			}
-			streetAddr := roadBuilder.String()
+				// fmt.Printf("Split to %s\n", pieces)
+				roadBuilder := strings.Builder{}
+				for _, piece := range config.RoadNoUnit {
+					val := strings.ReplaceAll(pieces[piece], " ", "+")
+					roadBuilder.WriteString(val)
+					roadBuilder.WriteRune('+')
+				}
+				streetAddr := roadBuilder.String()
 
-			// now we can construct the URL for querying the database
-			urlBuilder := strings.Builder{}
-			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
-			urlBuilder.WriteString(streetAddr)
-			urlBuilder.WriteString("&city=")
-			urlBuilder.WriteString(strings.ReplaceAll(pieces[config.CITY], " ", "+"))
-			urlBuilder.WriteString("&state=")
-			urlBuilder.WriteString(pieces[config.STATE])
-			urlBuilder.WriteString("&postalcode=")
-			urlBuilder.WriteString(pieces[config.ZIP])
-			url := urlBuilder.String()
+				// now we can construct the URL for querying the database
+				urlBuilder := strings.Builder{}
+				urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
+				urlBuilder.WriteString(streetAddr)
+				urlBuilder.WriteString("&city=")
+				urlBuilder.WriteString(strings.ReplaceAll(pieces[config.CITY], " ", "+"))
+				urlBuilder.WriteString("&state=")
+				urlBuilder.WriteString(pieces[config.STATE])
+				urlBuilder.WriteString("&postalcode=")
+				urlBuilder.WriteString(pieces[config.ZIP])
+				url := urlBuilder.String()
 
-			v := makeCall(&url)
+				v := makeCall(&url)
 
-			if len(v) == 0 {
-				badlines[numBads] = line
-				numBads++
-			} else if len(v) > 1 {
-				multilines[numMultis] = line
-				numMultis++
-			} else {
-				// one record - the good case
-				goodlines[numGoods] = v[0]
-				goodlines[numGoods].StateVoterIDStr = pieces[config.STATE_VOTER_ID]
-				numGoods++
-			}
+				if len(v) == 0 {
+					badlines[numBads] = line
+					numBads++
+				} else if len(v) > 1 {
+					multilines[numMultis] = line
+					numMultis++
+				} else {
+					// one record - the good case
+					goodlines[numGoods] = v[0]
+					goodlines[numGoods].StateVoterIDStr = pieces[config.STATE_VOTER_ID]
+					numGoods++
+				}
+			}(line)
 		}
 
 		for i := 0; i < numBads; i++ {

@@ -32,20 +32,21 @@ func NopFilterStrings(_ []string) bool {
 
 // JSONResult is the jsonv2 type we get from the nominatim API
 type JSONResult struct {
-	PlaceID           int `json:"place_id"`
-	Licence           string
-	OSMType           string `json:"osm_type"`
-	OSMID             int    `json:"osm_id"`
-	Boundingbox       [4]string
-	Lat               string
-	Lon               string
-	DisplayName       string `json:"display_name"`
-	PlaceRank         int    `json:"place_rank"`
-	Category          string
-	Objtype           string `json:"type"`
-	Importance        float64
-	StateVoterIDBytes [25]byte
-	StateVoterIDStr   string
+	PlaceID            int `json:"place_id"`
+	Licence            string
+	OSMType            string `json:"osm_type"`
+	OSMID              int    `json:"osm_id"`
+	Boundingbox        [4]string
+	Lat                string
+	Lon                string
+	DisplayName        string `json:"display_name"`
+	PlaceRank          int    `json:"place_rank"`
+	Category           string
+	Objtype            string `json:"type"`
+	Importance         float64
+	StateVoterIDBytes  [25]byte
+	StateVoterIDLength int
+	StateVoterIDStr    string
 }
 
 // MakeFiles sets up files for spitting out good, no, and multi-result Nominatim searches
