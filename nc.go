@@ -1,5 +1,7 @@
 package hcip2
 
+// import "fmt"
+
 // type Column int
 
 const (
@@ -104,7 +106,8 @@ var NC HciConfig = HciConfig{
 	Road:           []int{House_num, Half_code, Street_dir, Street_name, Street_type_cd, Street_sufx_cd, Unit_num},
 	RoadNoUnit:     []int{House_num, Half_code, Street_dir, Street_name, Street_type_cd, Street_sufx_cd},
 	FilterStr: func(pieces []string) bool {
-		return pieces[Status_cd] != "R" // ignore all the REMOVED users
+		// fmt.Println(pieces[Confidential_ind])
+		return pieces[Status_cd] != "R" && pieces[Confidential_ind] != "Y" // ignore all the REMOVED and CONFIDENTIAL users
 	},
 }
 
