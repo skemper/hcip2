@@ -55,7 +55,7 @@ func makeCall(url *string) []hcip2.JSONResult {
 }
 
 func main() {
-	goods, bads, multis := hcip2.MakeFiles()
+	_goods, _bads, _multis := hcip2.MakeFiles()
 
 	// we are reading just one file: 202011_VRDB_Extract.txt
 	vrdb, err := os.Open("nc_polling_places.csv")
@@ -65,15 +65,18 @@ func main() {
 		os.Exit(1)
 	}
 	reader := csv.NewReader(vrdb)
+	goods := csv.NewWriter(_goods)
+	bads := csv.NewWriter(_bads)
+	multis := csv.NewWriter(_multis)
 
 	start := time.Now()
 	var lines [][]string
-	var badlines [readBatchSize]string
+	var badlines [readBatchSize][]string
 	var numBads = 0
-	var multilines [readBatchSize]string
+	var multilines [readBatchSize][]string
 	var numMultis = 0
 
-	var goodlines [readBatchSize]hcip2.JSONResult
+	var goodlines [readBatchSize][]string
 	var numGoods = 0
 
 	lines, err = reader.ReadAll()
@@ -118,8 +121,7 @@ func main() {
 
 			if len(v) == 1 {
 				// still bad, write to bads.csv
-				goodlines[numGoods] = v[0]
-				goodlines[numGoods].StateVoterIDStr = oneline
+				goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
 				numGoods++
 				continue
 			}
@@ -135,38 +137,33 @@ func main() {
 
 			if len(v) == 1 {
 				// still bad, write to bads.csv
-				goodlines[numGoods] = v[0]
-				goodlines[numGoods].StateVoterIDStr = oneline
+				goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
 				numGoods++
 				continue
 			}
 
-
-			badlines[numBads] = oneline
+			badlines[numBads] = line
 			numBads++
 		} else if len(v) > 1 {
-			multilines[numMultis] = oneline
+			multilines[numMultis] = line
 			numMultis++
 		} else {
 			// one record - the good case
-			goodlines[numGoods] = v[0]
-			goodlines[numGoods].StateVoterIDStr = oneline
+			goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
 			numGoods++
 		}
 	}
 
 	for i := 0; i < numBads; i++ {
-		bads.WriteString(badlines[i])
-		bads.Write(newline)
+		bads.Write(badlines[i])
 	}
 
 	for i := 0; i < numMultis; i++ {
-		multis.WriteString(multilines[i])
-		multis.Write(newline)
+		multis.Write(multilines[i])
 	}
 
 	for i := 0; i < numGoods; i++ {
-		goods.WriteString(fmt.Sprintf("%s,%s,%s\n", goodlines[i].StateVoterIDStr, goodlines[i].Lat, goodlines[i].Lon))
+		goods.Write(goodlines[i])
 	}
 
 	end := time.Now()
