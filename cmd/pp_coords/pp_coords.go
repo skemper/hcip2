@@ -18,8 +18,8 @@ const (
 	CountyID int = iota
 	PrecinctLabel
 	PrecinctDescription
-	PrecinctName
-	PrecinctAddr
+	PollingPlaceName
+	PollingPlaceAddr
 )
 
 var addrRegexp = regexp.MustCompile(`([^,]+),([^,]+), NC (\d{5})`)
@@ -84,7 +84,9 @@ func main() {
 
 	for _, line := range lines {
 		oneline := strings.Join(line, ",")
-		fulladdr := line[PrecinctAddr]
+		fmt.Printf("\n")
+		fmt.Println(oneline)
+		fulladdr := line[PollingPlaceAddr]
 		addrPieces := addrRegexp.FindStringSubmatch(fulladdr)
 		if addrPieces == nil {
 			fmt.Printf("Line %s doesn't match regex\n", fulladdr)
@@ -99,7 +101,7 @@ func main() {
 		urlBuilder.WriteString("&state=NC&postalcode=")
 		urlBuilder.WriteString(addrPieces[3])
 		url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
-		// fmt.Println(url)
+		fmt.Println(url)
 		v := makeCall(&url)
 
 		if len(v) == 0 {
@@ -107,11 +109,12 @@ func main() {
 			// try 1: with just name and zip code
 			urlBuilder = strings.Builder{}
 			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&q=")
-			urlBuilder.WriteString(line[PrecinctDescription])
+			urlBuilder.WriteString(line[PollingPlaceName])
 			urlBuilder.WriteString(", ")
 			urlBuilder.WriteString(addrPieces[3])
 			url = strings.ReplaceAll(urlBuilder.String(), " ", "+")
-			v := makeCall(&url)
+			fmt.Println(url)
+			v = makeCall(&url)
 
 			if len(v) == 1 {
 				// still bad, write to bads.csv
@@ -120,6 +123,24 @@ func main() {
 				numGoods++
 				continue
 			}
+
+			urlBuilder = strings.Builder{}
+			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
+			urlBuilder.WriteString(addrPieces[1])
+			urlBuilder.WriteString("&state=NC&postalcode=")
+			urlBuilder.WriteString(addrPieces[3])
+			url = strings.ReplaceAll(urlBuilder.String(), " ", "+")
+			fmt.Println(url)
+			v = makeCall(&url)
+
+			if len(v) == 1 {
+				// still bad, write to bads.csv
+				goodlines[numGoods] = v[0]
+				goodlines[numGoods].StateVoterIDStr = oneline
+				numGoods++
+				continue
+			}
+
 
 			badlines[numBads] = oneline
 			numBads++
