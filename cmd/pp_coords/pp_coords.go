@@ -86,17 +86,20 @@ func main() {
 		oneline := strings.Join(line, ",")
 		fulladdr := line[PrecinctAddr]
 		addrPieces := addrRegexp.FindStringSubmatch(fulladdr)
+		if addrPieces == nil {
+			fmt.Printf("Line %s doesn't match regex\n", fulladdr)
+		}
 
 		// now we can construct the URL for querying the database
 		urlBuilder := strings.Builder{}
 		urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
-		urlBuilder.WriteString(addrPieces[0])
-		urlBuilder.WriteString("&city=")
 		urlBuilder.WriteString(addrPieces[1])
-		urlBuilder.WriteString("&state=NC&postalcode=")
+		urlBuilder.WriteString("&city=")
 		urlBuilder.WriteString(addrPieces[2])
+		urlBuilder.WriteString("&state=NC&postalcode=")
+		urlBuilder.WriteString(addrPieces[3])
 		url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
-
+		fmt.Println(url)
 		v := makeCall(&url)
 
 		if len(v) == 0 {

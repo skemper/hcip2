@@ -50,17 +50,14 @@ func main() {
 	}
 }
 
-func makeCall(url *string) []hcip2.JSONResult {
+func makeCall(url *string) ([]hcip2.JSONResult, error) {
 	// Call Nominatim to geocode their address
 	resp, err := http.Get(*url)
 	if err != nil {
-		fmt.Printf("Error calling Nominatim: %s\n", err.Error())
-		os.Exit(1)
+		return nil, fmt.Errorf("Error calling Nominatim: %s", err.Error())
 	}
 	if resp.StatusCode != 200 {
-		fmt.Printf("Non-OK response code from Nominatim: %d %s\n", resp.StatusCode, resp.Body)
-		fmt.Printf("Came from URL %s\n", *url)
-		os.Exit(1)
+		return nil, fmt.Errorf("Non-OK response code from %s: %d %s\n", *url, resp.StatusCode, resp.Body)
 	}
 
 	v := []hcip2.JSONResult{}
@@ -70,9 +67,9 @@ func makeCall(url *string) []hcip2.JSONResult {
 		fmt.Printf("From URL: %s\n", *url)
 		body, _ := ioutil.ReadAll(resp.Body)
 		fmt.Printf("Full response was: %s\n", body)
-		os.Exit(1)
+		return nil, err
 	}
-	return v
+	return v, nil
 }
 
 func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.File) {
@@ -148,7 +145,11 @@ func doBytes(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *os.
 			urlBuilder.Write(pieces[config.ZIP])
 			url := urlBuilder.String()
 
-			v := makeCall(&url)
+			v, err := makeCall(&url)
+			if err != nil {
+				fmt.Println("Error geocoding: %s\n", err)
+				fmt.Println("Line was %s\n", line)
+			}
 
 			if len(v) == 0 {
 				badlines[numBads] = line
@@ -251,7 +252,11 @@ func doStrings(config *hcip2.HciConfig, goods *os.File, bads *os.File, multis *o
 			urlBuilder.WriteString(pieces[config.ZIP])
 			url := urlBuilder.String()
 
-			v := makeCall(&url)
+			v, err := makeCall(&url)
+			if err != nil {
+				fmt.Println("Error geocoding: %s\n", err)
+				fmt.Println("Line was %s\n", line)
+			}
 
 			if len(v) == 0 {
 				badlines[numBads] = line
