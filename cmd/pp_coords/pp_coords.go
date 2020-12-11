@@ -29,7 +29,7 @@ const maxLineLength = 1000
 
 var newline = []byte{'\n'}
 
-func makeCall(url *string) []hcip2.JSONResult {
+func makeCall(url *string) *[]hcip2.JSONResult {
 	// Call Nominatim to geocode their address
 	resp, err := http.Get(*url)
 	if err != nil {
@@ -42,7 +42,7 @@ func makeCall(url *string) []hcip2.JSONResult {
 		os.Exit(1)
 	}
 
-	v := []hcip2.JSONResult{}
+	v := new([]hcip2.JSONResult)
 	err = json.NewDecoder(resp.Body).Decode(&v)
 	if err != nil {
 		fmt.Printf("Error decoding JSON: %s\n", err.Error())
@@ -52,6 +52,55 @@ func makeCall(url *string) []hcip2.JSONResult {
 		os.Exit(1)
 	}
 	return v
+}
+
+// query1 decomposes the entire address and feeds the structed data to the API
+func query1(addrPieces []string) *[]hcip2.JSONResult {
+	urlBuilder := strings.Builder{}
+	urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
+	urlBuilder.WriteString(addrPieces[1])
+	urlBuilder.WriteString("&city=")
+	urlBuilder.WriteString(addrPieces[2])
+	urlBuilder.WriteString("&state=NC&postalcode=")
+	urlBuilder.WriteString(addrPieces[3])
+	url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
+	fmt.Println(url)
+	return makeCall(&url)
+}
+
+// query2 asks just the location name and the ZIP code
+func query2(name string, addrPieces []string) *[]hcip2.JSONResult {
+	urlBuilder := strings.Builder{}
+	urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&q=")
+	urlBuilder.WriteString(name)
+	urlBuilder.WriteString(", ")
+	urlBuilder.WriteString(addrPieces[3])
+	url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
+	fmt.Println(url)
+	return makeCall(&url)
+}
+
+// query3 is like query1, but without the city
+func query3(addrPieces []string) *[]hcip2.JSONResult {
+	urlBuilder := strings.Builder{}
+	urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
+	urlBuilder.WriteString(addrPieces[1])
+	urlBuilder.WriteString("&state=NC&postalcode=")
+	urlBuilder.WriteString(addrPieces[3])
+	url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
+	fmt.Println(url)
+	return makeCall(&url)
+}
+
+// query4 looks for the name of the polling place, in North Carolina.  it's a Hail Mary, but it works in at least one case
+func query4(name string) *[]hcip2.JSONResult {
+	urlBuilder := strings.Builder{}
+	urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&q=")
+	urlBuilder.WriteString(name)
+	urlBuilder.WriteString(", NC, USA")
+	url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
+	fmt.Println(url)
+	return makeCall(&url)
 }
 
 func main() {
@@ -85,7 +134,9 @@ func main() {
 		os.Exit(1)
 	}
 
+	count := 0
 	for _, line := range lines {
+		count++
 		oneline := strings.Join(line, ",")
 		fmt.Printf("\n")
 		fmt.Println(oneline)
@@ -95,78 +146,56 @@ func main() {
 			fmt.Printf("Line %s doesn't match regex\n", fulladdr)
 		}
 
-		// now we can construct the URL for querying the database
-		urlBuilder := strings.Builder{}
-		urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
-		urlBuilder.WriteString(addrPieces[1])
-		urlBuilder.WriteString("&city=")
-		urlBuilder.WriteString(addrPieces[2])
-		urlBuilder.WriteString("&state=NC&postalcode=")
-		urlBuilder.WriteString(addrPieces[3])
-		url := strings.ReplaceAll(urlBuilder.String(), " ", "+")
-		fmt.Println(url)
-		v := makeCall(&url)
-
-		if len(v) == 0 {
-			// no match - widen the search a bit?
-			// try 1: with just name and zip code
-			urlBuilder = strings.Builder{}
-			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&q=")
-			urlBuilder.WriteString(line[PollingPlaceName])
-			urlBuilder.WriteString(", ")
-			urlBuilder.WriteString(addrPieces[3])
-			url = strings.ReplaceAll(urlBuilder.String(), " ", "+")
-			fmt.Println(url)
-			v = makeCall(&url)
-
-			if len(v) == 1 {
-				// still bad, write to bads.csv
-				goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
-				numGoods++
-				continue
-			}
-
-			urlBuilder = strings.Builder{}
-			urlBuilder.WriteString("http://localhost/nominatim/search?country=us&format=jsonv2&street=")
-			urlBuilder.WriteString(addrPieces[1])
-			urlBuilder.WriteString("&state=NC&postalcode=")
-			urlBuilder.WriteString(addrPieces[3])
-			url = strings.ReplaceAll(urlBuilder.String(), " ", "+")
-			fmt.Println(url)
-			v = makeCall(&url)
-
-			if len(v) == 1 {
-				// still bad, write to bads.csv
-				goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
-				numGoods++
-				continue
-			}
-
-			badlines[numBads] = line
-			numBads++
-		} else if len(v) > 1 {
-			multilines[numMultis] = line
-			numMultis++
-		} else {
-			// one record - the good case
-			goodlines[numGoods] = append(line, v[0].Lat, v[0].Lon)
+		v := query1(addrPieces)
+		if len(*v) == 1 {
+			goodlines[numGoods] = append(line, (*v)[0].Lat, (*v)[0].Lon)
 			numGoods++
+			continue
 		}
+
+		v = query2(line[PollingPlaceName], addrPieces)
+		if len(*v) == 1 {
+			goodlines[numGoods] = append(line, (*v)[0].Lat, (*v)[0].Lon)
+			numGoods++
+			continue
+		}
+
+		v = query3(addrPieces)
+		if len(*v) == 1 {
+			goodlines[numGoods] = append(line, (*v)[0].Lat, (*v)[0].Lon)
+			numGoods++
+			continue
+		}
+
+		v = query4(line[PollingPlaceName])
+		if len(*v) == 1 {
+			goodlines[numGoods] = append(line, (*v)[0].Lat, (*v)[0].Lon)
+			numGoods++
+			continue
+		}
+
+		badlines[numBads] = line
+		numBads++
 	}
 
 	for i := 0; i < numBads; i++ {
 		bads.Write(badlines[i])
+		goods.Write(append(badlines[i], "", ""))
 	}
 
 	for i := 0; i < numMultis; i++ {
 		multis.Write(multilines[i])
+		goods.Write(append(multilines[i], "", ""))
 	}
 
 	for i := 0; i < numGoods; i++ {
 		goods.Write(goodlines[i])
 	}
+	goods.Flush()
+	bads.Flush()
+	multis.Flush()
 
 	end := time.Now()
-	fmt.Printf("Finished in %s...\n", end.Sub(start))
+	fmt.Printf("Finished (read: %d, wrote: %d) in %s...\n", count, numGoods+numBads+numMultis, end.Sub(start))
 
 }
